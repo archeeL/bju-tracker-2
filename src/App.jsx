@@ -39,7 +39,6 @@ const ALIASES = {
   "куриная грудка": "куриная грудка",
   курица: "куриная грудка",
   курицу: "куриная грудка",
-  куриной: "куриная грудка",
   грудка: "куриная грудка",
   грудки: "куриная грудка",
 
@@ -79,6 +78,12 @@ const DEFAULT_SETTINGS = {
   waterGoal: 2000,
 };
 
+const STORAGE_KEYS = {
+  entries: "bju_v2_entries",
+  settings: "bju_v2_settings",
+  bmi: "bju_v2_bmi",
+};
+
 function round1(value) {
   return Math.round(value * 10) / 10;
 }
@@ -112,7 +117,6 @@ function getMonthData(dateKey) {
   const current = new Date(dateKey + "T12:00:00");
   const year = current.getFullYear();
   const month = current.getMonth();
-
   const first = new Date(year, month, 1, 12);
   const firstWeekday = (first.getDay() + 6) % 7;
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -129,8 +133,6 @@ function getMonthData(dateKey) {
       year: "numeric",
     }),
     cells,
-    year,
-    month,
   };
 }
 
@@ -198,6 +200,7 @@ function parseSmartEntry(rawInput) {
       quantity: ml,
       waterMl: ml,
       macros: { p: 0, f: 0, c: 0, kcal: 0 },
+      source: "manual",
     };
   }
 
@@ -235,22 +238,44 @@ function parseSmartEntry(rawInput) {
     quantity,
     waterMl: 0,
     macros,
+    source: "manual",
   };
+}
+
+function calculateBmi(weightKg, heightCm) {
+  const h = heightCm / 100;
+  if (!weightKg || !heightCm || h <= 0) return null;
+  return weightKg / (h * h);
+}
+
+function getBmiCategory(bmi) {
+  if (bmi == null) return "—";
+  if (bmi < 18.5) return "Ниже нормы";
+  if (bmi < 25) return "Норма";
+  if (bmi < 30) return "Выше нормы";
+  return "Ожирение";
 }
 
 function App() {
   const [selectedDate, setSelectedDate] = useState(todayKey());
   const [calendarMonth, setCalendarMonth] = useState(
-    formatDateKey(new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12))
+    formatDateKey(
+      new Date(new Date().getFullYear(), new Date().getMonth(), 1, 12)
+    )
   );
   const [entriesByDate, setEntriesByDate] = useState({});
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [bmiData, setBmiData] = useState({ height: 175, weight: 70 });
   const [input, setInput] = useState("");
   const [message, setMessage] = useState("");
+  const [showManualInput, setShowManualInput] = useState(true);
+  const [photoPreview, setPhotoPreview] = useState("");
+  const [photoMessage, setPhotoMessage] = useState("");
 
   useEffect(() => {
-    const savedEntries = localStorage.getItem("tracker_entries_v1");
-    const savedSettings = localStorage.getItem("tracker_settings_v1");
+    const savedEntries = localStorage.getItem(STORAGE_KEYS.entries);
+    const savedSettings = localStorage.getItem(STORAGE_KEYS.settings);
+    const savedBmi = localStorage.getItem(STORAGE_KEYS.bmi);
 
     if (savedEntries) {
       try {
@@ -263,15 +288,25 @@ function App() {
         setSettings({ ...DEFAULT_SETTINGS, ...JSON.parse(savedSettings) });
       } catch {}
     }
+
+    if (savedBmi) {
+      try {
+        setBmiData(JSON.parse(savedBmi));
+      } catch {}
+    }
   }, []);
 
   useEffect(() => {
-    localStorage.setItem("tracker_entries_v1", JSON.stringify(entriesByDate));
+    localStorage.setItem(STORAGE_KEYS.entries, JSON.stringify(entriesByDate));
   }, [entriesByDate]);
 
   useEffect(() => {
-    localStorage.setItem("tracker_settings_v1", JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEYS.bmi, JSON.stringify(bmiData));
+  }, [bmiData]);
 
   useEffect(() => {
     const d = new Date(selectedDate + "T12:00:00");
@@ -295,6 +330,11 @@ function App() {
   }, [dayEntries]);
 
   const monthData = useMemo(() => getMonthData(calendarMonth), [calendarMonth]);
+
+  const bmiValue = useMemo(
+    () => calculateBmi(Number(bmiData.weight), Number(bmiData.height)),
+    [bmiData]
+  );
 
   function addEntry() {
     const parsed = parseSmartEntry(input);
@@ -336,6 +376,7 @@ function App() {
       quantity: ml,
       waterMl: ml,
       macros: { p: 0, f: 0, c: 0, kcal: 0 },
+      source: "quick-water",
     };
 
     setEntriesByDate((prev) => ({
@@ -358,8 +399,22 @@ function App() {
     }));
   }
 
-  function selectDate(dateKey) {
-    setSelectedDate(dateKey);
+  function updateBmiField(key, value) {
+    setBmiData((prev) => ({
+      ...prev,
+      [key]: Number(value || 0),
+    }));
+  }
+
+  function onPhotoSelected(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const objectUrl = URL.createObjectURL(file);
+    setPhotoPreview(objectUrl);
+    setPhotoMessage(
+      "Фото загружено. Следующим шагом сюда можно будет подключить AI-разбор еды."
+    );
   }
 
   const waterPercent = Math.min(
@@ -405,7 +460,9 @@ function App() {
           font-family: Inter, system-ui, Arial, sans-serif;
         }
 
-        * { box-sizing: border-box; }
+        * {
+          box-sizing: border-box;
+        }
 
         body {
           margin: 0;
@@ -414,7 +471,7 @@ function App() {
             radial-gradient(circle at top, #16233b 0%, #0c1524 42%, #08101a 100%);
         }
 
-        button, input {
+        button, input, label {
           font: inherit;
         }
 
@@ -461,7 +518,7 @@ function App() {
           margin-bottom: 14px;
         }
 
-        .date-btn, .icon-btn, .mini-btn, .main-btn, .danger-btn {
+        .icon-btn, .date-btn, .mini-btn, .main-btn, .ghost-btn, .danger-btn, .tab-btn, .file-label {
           border: 0;
           cursor: pointer;
           color: #edf3ff;
@@ -566,57 +623,6 @@ function App() {
           background: white;
         }
 
-        .input {
-          width: 100%;
-          border: 0;
-          outline: none;
-          border-radius: 16px;
-          padding: 14px 16px;
-          background: #0f1a2d;
-          color: white;
-          font-size: 16px;
-        }
-
-        .input::placeholder {
-          color: #7d91b8;
-        }
-
-        .main-btn {
-          width: 100%;
-          margin-top: 12px;
-          padding: 14px 16px;
-          border-radius: 16px;
-          font-weight: 700;
-          background: linear-gradient(135deg, #4f8cff, #6d5dfc);
-        }
-
-        .main-btn:hover {
-          opacity: 0.96;
-        }
-
-        .chip-row {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-top: 12px;
-        }
-
-        .mini-btn {
-          background: #16243d;
-          border-radius: 12px;
-          padding: 10px 12px;
-        }
-
-        .mini-btn:hover {
-          background: #1b2d4b;
-        }
-
-        .message {
-          margin-top: 10px;
-          color: #a7b7d6;
-          font-size: 14px;
-        }
-
         .progress {
           width: 100%;
           height: 12px;
@@ -638,6 +644,23 @@ function App() {
           margin-top: 10px;
           color: #9dafcf;
           font-size: 14px;
+        }
+
+        .chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 12px;
+        }
+
+        .mini-btn {
+          background: #16243d;
+          border-radius: 12px;
+          padding: 10px 12px;
+        }
+
+        .mini-btn:hover {
+          background: #1b2d4b;
         }
 
         .grid {
@@ -671,6 +694,120 @@ function App() {
           margin-top: 10px;
           color: #8fa5ca;
           font-size: 12px;
+        }
+
+        .action-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+          margin-bottom: 12px;
+        }
+
+        .main-btn, .file-label {
+          width: 100%;
+          min-height: 54px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 14px 16px;
+          border-radius: 16px;
+          font-weight: 700;
+          background: linear-gradient(135deg, #4f8cff, #6d5dfc);
+        }
+
+        .ghost-btn {
+          width: 100%;
+          min-height: 54px;
+          border-radius: 16px;
+          background: #16243d;
+          font-weight: 700;
+        }
+
+        .tab-btn {
+          flex: 1;
+          min-height: 44px;
+          border-radius: 14px;
+          background: #101b2f;
+          font-weight: 700;
+        }
+
+        .tab-btn.active {
+          background: linear-gradient(135deg, #4f8cff, #6d5dfc);
+        }
+
+        .tab-row {
+          display: flex;
+          gap: 8px;
+          margin-bottom: 12px;
+        }
+
+        .input {
+          width: 100%;
+          border: 0;
+          outline: none;
+          border-radius: 16px;
+          padding: 14px 16px;
+          background: #0f1a2d;
+          color: white;
+          font-size: 16px;
+        }
+
+        .input::placeholder {
+          color: #7d91b8;
+        }
+
+        .message {
+          margin-top: 10px;
+          color: #a7b7d6;
+          font-size: 14px;
+        }
+
+        .photo-preview {
+          width: 100%;
+          border-radius: 18px;
+          margin-top: 12px;
+          display: block;
+          border: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .photo-placeholder {
+          margin-top: 12px;
+          border-radius: 18px;
+          padding: 18px;
+          background: #0f1a2d;
+          color: #9dafcf;
+          text-align: center;
+          font-size: 14px;
+        }
+
+        .bmi-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+
+        .bmi-result {
+          display: flex;
+          align-items: stretch;
+          gap: 12px;
+          flex-wrap: wrap;
+        }
+
+        .bmi-box {
+          flex: 1;
+          min-width: 120px;
+          background: #0f1a2d;
+          border-radius: 16px;
+          padding: 14px;
+        }
+
+        .bmi-big {
+          font-size: 30px;
+          font-weight: 800;
+          line-height: 1;
+          margin-top: 6px;
         }
 
         .empty {
@@ -746,6 +883,10 @@ function App() {
           color: white;
         }
 
+        .file-input {
+          display: none;
+        }
+
         @media (max-width: 480px) {
           .title {
             font-size: 28px;
@@ -758,25 +899,29 @@ function App() {
           .stat-value {
             font-size: 24px;
           }
+
+          .settings-grid, .bmi-grid, .grid, .action-grid {
+            grid-template-columns: 1fr 1fr;
+          }
         }
       `}</style>
 
       <div className="app">
         <div className="phone">
-          <h1 className="title">БЖУ трекер</h1>
-          <p className="subtitle">Еда, вода, цели и календарь по дням</p>
+          <h1 className="title">БЖУ трекер v2</h1>
+          <p className="subtitle">Карточки, календарь, BMI, вода и добавление еды</p>
 
           <div className="topbar">
             <button
               className="icon-btn"
-              onClick={() => selectDate(shiftDate(selectedDate, -1))}
+              onClick={() => setSelectedDate(shiftDate(selectedDate, -1))}
             >
               ←
             </button>
             <button className="date-btn">{formatDateLabel(selectedDate)}</button>
             <button
               className="icon-btn"
-              onClick={() => selectDate(shiftDate(selectedDate, 1))}
+              onClick={() => setSelectedDate(shiftDate(selectedDate, 1))}
             >
               →
             </button>
@@ -819,7 +964,7 @@ function App() {
                     ]
                       .join(" ")
                       .trim()}
-                    onClick={() => selectDate(cell)}
+                    onClick={() => setSelectedDate(cell)}
                   >
                     {new Date(cell + "T12:00:00").getDate()}
                     {(entriesByDate[cell]?.length || 0) > 0 && (
@@ -849,8 +994,7 @@ function App() {
             <div className="water-meta">
               <span>Цель: {round1(settings.waterGoal / 1000)} л</span>
               <span>
-                Осталось:{" "}
-                {Math.max(0, round1((settings.waterGoal - totals.water) / 1000))} л
+                Осталось: {Math.max(0, round1((settings.waterGoal - totals.water) / 1000))} л
               </span>
             </div>
 
@@ -882,33 +1026,132 @@ function App() {
           </div>
 
           <div className="card">
-            <div className="section-title">Умный ввод</div>
-            <input
-              className="input"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addEntry()}
-              placeholder="Например: 1 банан, 2 яйца, 150 рис, 300 вода"
-            />
-            <button className="main-btn" onClick={addEntry}>
-              Добавить
-            </button>
+            <div className="section-title">Добавить еду</div>
 
-            <div className="chip-row">
-              {["1 банан", "2 яйца", "150 рис", "200 молоко", "300 вода"].map(
-                (hint) => (
+            <div className="action-grid">
+              <label className="file-label">
+                📷 Фото еды
+                <input
+                  className="file-input"
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={onPhotoSelected}
+                />
+              </label>
+
+              <button
+                className="ghost-btn"
+                onClick={() => setShowManualInput((prev) => !prev)}
+              >
+                ✏️ Ввести вручную
+              </button>
+            </div>
+
+            {photoPreview ? (
+              <>
+                <img src={photoPreview} alt="Фото еды" className="photo-preview" />
+                {photoMessage ? <div className="message">{photoMessage}</div> : null}
+              </>
+            ) : (
+              <div className="photo-placeholder">
+                Здесь будет превью фото. Позже сюда можно подключить AI-разбор еды.
+              </div>
+            )}
+
+            <div className="tab-row" style={{ marginTop: 12 }}>
+              <button
+                className={`tab-btn ${showManualInput ? "active" : ""}`}
+                onClick={() => setShowManualInput(true)}
+              >
+                Ручной ввод
+              </button>
+              <button
+                className={`tab-btn ${!showManualInput ? "active" : ""}`}
+                onClick={() => setShowManualInput(false)}
+              >
+                Подсказки
+              </button>
+            </div>
+
+            {showManualInput ? (
+              <>
+                <input
+                  className="input"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addEntry()}
+                  placeholder="Например: 1 банан, 2 яйца, 150 рис, 300 вода"
+                />
+                <button className="main-btn" onClick={addEntry} style={{ marginTop: 12 }}>
+                  Добавить запись
+                </button>
+              </>
+            ) : (
+              <div className="chip-row" style={{ marginTop: 0 }}>
+                {[
+                  "1 банан",
+                  "2 яйца",
+                  "150 рис",
+                  "200 молоко",
+                  "300 вода",
+                  "1 яблоко",
+                ].map((hint) => (
                   <button
                     key={hint}
                     className="mini-btn"
-                    onClick={() => setInput(hint)}
+                    onClick={() => {
+                      setInput(hint);
+                      setShowManualInput(true);
+                    }}
                   >
                     {hint}
                   </button>
-                )
-              )}
-            </div>
+                ))}
+              </div>
+            )}
 
             {message ? <div className="message">{message}</div> : null}
+          </div>
+
+          <div className="card">
+            <div className="section-title">⚖️ BMI калькулятор</div>
+
+            <div className="bmi-grid">
+              <div className="field">
+                <label>Рост (см)</label>
+                <input
+                  type="number"
+                  value={bmiData.height}
+                  onChange={(e) => updateBmiField("height", e.target.value)}
+                />
+              </div>
+
+              <div className="field">
+                <label>Вес (кг)</label>
+                <input
+                  type="number"
+                  value={bmiData.weight}
+                  onChange={(e) => updateBmiField("weight", e.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="bmi-result">
+              <div className="bmi-box">
+                <div className="stat-label">BMI</div>
+                <div className="bmi-big">
+                  {bmiValue ? round1(bmiValue) : "—"}
+                </div>
+              </div>
+
+              <div className="bmi-box">
+                <div className="stat-label">Категория</div>
+                <div className="bmi-big" style={{ fontSize: 22 }}>
+                  {getBmiCategory(bmiValue)}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="card">
@@ -917,12 +1160,12 @@ function App() {
                 Записи за день
               </div>
               <button className="danger-btn" onClick={clearDay}>
-                Очистить
+                Очистить день
               </button>
             </div>
 
             {dayEntries.length === 0 ? (
-              <div className="empty">Пока пусто. Добавь еду или воду выше.</div>
+              <div className="empty">Пока пусто. Добавь еду, воду или фото выше.</div>
             ) : (
               <div className="list">
                 {dayEntries.map((item) => (
@@ -939,10 +1182,7 @@ function App() {
                       )}
                     </div>
 
-                    <button
-                      className="delete-btn"
-                      onClick={() => removeEntry(item.id)}
-                    >
+                    <button className="delete-btn" onClick={() => removeEntry(item.id)}>
                       ✕
                     </button>
                   </div>
